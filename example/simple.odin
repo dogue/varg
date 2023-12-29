@@ -46,10 +46,8 @@ main :: proc() {
 	parsed_args := varg.parse(app)
 
 	fmt.println(parsed_args)
-	// ParsedArgs :: struct {
-	//     command: Maybe(Command),
-	//     flags:   map[string]bool,
-	//     args:    map[string]string,
-	// }
+
+	// ❯ odin run . -- foo -b --baz hellope
+	// ParsedArgs{command = Command{name = "foo", help_text = "an original placeholder"}, flags = map[bar=true], args = map[baz="hellope"]}
 }
 
