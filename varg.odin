@@ -4,13 +4,6 @@ import "core:fmt"
 import "core:os"
 import "core:strings"
 
-// name: string
-// description: string
-// version: string
-// author: string
-// commands: []Command
-// flags: []Flag,
-// args: []Argument
 App :: struct {
 	name:        string,
 	description: string,
@@ -46,11 +39,6 @@ ParsedArgs :: struct {
 	command: Maybe(Command),
 	flags:   map[string]bool,
 	args:    map[string]string,
-}
-
-ParseError :: enum {
-	None,
-	CommandNotFound,
 }
 
 @(private)
@@ -137,52 +125,63 @@ parse :: proc(app: App) -> ParsedArgs {
 	return app.parsed_args
 }
 
-// only here for prototyping/getting a feel for the API
-// will be removed later
-main :: proc() {
-	help := Command {
-		name      = "help",
-		help_text = "show help message",
+print_help :: proc(app: App) {
+	fmt.printf("%s (%s) - %s\n", app.name, app.version, app.description)
+	fmt.printf("Author: %s\n", app.author)
+	fmt.printf("Usage: %s OPTION\n\n", app.name)
+
+	cmd_opts := make([]string, len(app.commands))
+	cmd_help := make([]string, len(app.commands))
+	for cmd, i in app.commands {
+		cmd_opts[i] = cmd.name
+		cmd_help[i] = cmd.help_text
 	}
 
-	foo := Command {
-		name      = "foo",
-		help_text = "placeholder garbage",
+	cmd_width := calc_col_width(cmd_opts)
+
+	flag_opts := make([]string, len(app.flags))
+	flag_help := make([]string, len(app.flags))
+	for flag, i in app.flags {
+		flag_opts[i] = fmt.aprintf("-%s, --%s", flag.short, flag.long)
+		flag_help[i] = flag.help_text
 	}
 
-	dingus := Flag {
-		name      = "dingus",
-		help_text = "i am a dingus",
-		short     = "d",
-		long      = "dingus",
+	flag_width := calc_col_width(flag_opts)
+
+	arg_opts := make([]string, len(app.args))
+	arg_help := make([]string, len(app.args))
+	for arg, i in app.args {
+		arg_opts[i] = fmt.aprintf("-%s, --%s <VALUE>", arg.short, arg.long)
+		arg_help[i] = arg.help_text
 	}
 
-	bar := Flag {
-		name      = "bar",
-		help_text = "more placeholder",
-		short     = "b",
-		long      = "bar",
+	arg_width := calc_col_width(arg_opts)
+
+	max_width := max(cmd_width, flag_width, arg_width) + 4
+
+	print_section("COMMANDS", cmd_opts, cmd_help, max_width)
+	print_section("FLAGS", flag_opts, flag_help, max_width)
+	print_section("ARGUMENTS", arg_opts, arg_help, max_width)
+}
+
+@(private)
+print_section :: proc(title: string, options: []string, help_texts: []string, width: int) {
+	if len(options) < 1 do return
+
+	fmt.printf("%s:\n", title)
+	for opt, i in options {
+		fmt.printf("  %s%s%s\n", opt, strings.repeat(" ", width - len(opt)), help_texts[i])
+	}
+	fmt.println()
+}
+
+@(private)
+calc_col_width :: proc(items: []string) -> int {
+	max := 0
+	for item in items {
+		if len(item) > max do max = len(item)
 	}
 
-	baz := Argument {
-		name      = "baz",
-		help_text = "placeholder, but argument",
-		short     = "z",
-		long      = "baz",
-	}
-
-	app := App {
-		name = "varg",
-		description = "a command line argument parsing library written by a tard",
-		author = "dogue",
-		version = "1.0.0",
-		commands = {help, foo},
-		flags = {dingus, bar},
-		args = {baz},
-	}
-
-	parsed := parse(app)
-
-	fmt.println(parsed)
+	return max
 }
 
