@@ -137,6 +137,8 @@ parse :: proc(app: App) -> ParsedArgs {
 	return app.parsed_args
 }
 
+// only here for prototyping/getting a feel for the API
+// will be removed later
 main :: proc() {
 	help := Command {
 		name      = "help",
