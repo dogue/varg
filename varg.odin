@@ -3,12 +3,14 @@ package varg
 import "core:fmt"
 import "core:os"
 import "core:strings"
+import "core:log"
 
 App :: struct {
 	name:        string,
 	description: string,
 	version:     string,
 	author:      string,
+	auto_help:   bool,
 	commands:    []Command,
 	flags:       []Flag,
 	args:        []Argument,
@@ -16,8 +18,10 @@ App :: struct {
 }
 
 Command :: struct {
-	name:      string,
-	help_text: string,
+	name:        string,
+	takes_value: bool,
+	value:       string,
+	help_text:   string,
 }
 
 Flag :: struct {
@@ -36,22 +40,53 @@ Argument :: struct {
 }
 
 ParsedArgs :: struct {
-	command: Maybe(Command),
+	command: Command,
 	flags:   map[string]bool,
 	args:    map[string]string,
 }
 
+ParseError :: enum {
+	None,
+	RequiredValueNotProvided,
+}
+
 @(private)
-parse_command :: proc(app: ^App) {
-	raw_args := os.args[1:]
-	for arg in raw_args {
-		for cmd, i in app.commands {
-			if arg == cmd.name {
-				app.parsed_args.command = app.commands[i]
-				return
+parse_command :: proc(
+	user_cmds: []Command,
+	input: []string,
+) -> (
+	command: Command,
+	err: ParseError,
+) {
+	for arg, i in input {
+		ok: bool
+		command, ok = match_command(arg, user_cmds)
+		if !ok do continue
+
+		if command.takes_value {
+			value, valid := match_value(i, input)
+			if valid {
+				command.value = value
+			} else {
+				err = .RequiredValueNotProvided
 			}
 		}
+
+		return
 	}
+
+	return
+}
+
+@(private)
+match_command :: proc(raw_arg: string, app_cmds: []Command) -> (parsed: Command, ok: bool) {
+	for cmd in app_cmds {
+		if cmd.name == raw_arg {
+			return cmd, true
+		}
+	}
+
+	return
 }
 
 @(private)
@@ -61,15 +96,26 @@ prefix_args :: proc(s, l: string) -> (short, long: string) {
 	return
 }
 
+// @(private)
+// parse_flags :: proc(app: ^App, args: []string) {
+// 	for arg in args {
+// 		matched := match_flag(arg, app.flags)
+// 		if matched != nil {
+// 			app.parsed_args.flags[matched.?.name] = true
+// 		}
+// 	}
+// }
+
 @(private)
-parse_flags :: proc(app: ^App) {
-	raw_args := os.args[1:]
-	for arg in raw_args {
-		matched := match_flag(arg, app.flags)
+parse_flags :: proc(user_flags: []Flag, input: []string) -> (parsed_flags: map[string]bool) {
+	for arg in input {
+		matched := match_flag(arg, user_flags)
 		if matched != nil {
-			app.parsed_args.flags[matched.?.name] = true
+			parsed_flags[matched.?.name] = true
 		}
 	}
+
+	return
 }
 
 @(private)
@@ -85,15 +131,18 @@ match_flag :: proc(raw_arg: string, app_flags: []Flag) -> Maybe(Flag) {
 }
 
 @(private)
-parse_args :: proc(app: ^App) {
-	raw_args := os.args[1:]
-	for arg, i in raw_args {
-		matched := match_arg(arg, app.args)
+parse_args :: proc(user_args: []Argument, input: []string) -> (args: map[string]string) {
+	for arg, i in input {
+		matched := match_arg(arg, user_args)
 		if matched != nil {
-			value := match_value(i, raw_args)
-			if value != nil do app.parsed_args.args[matched.?.name] = value.?
+			value, ok := match_value(i, input)
+			if ok {
+				args[matched.?.name] = value
+			}
 		}
 	}
+
+	return
 }
 
 @(private)
@@ -109,23 +158,25 @@ match_arg :: proc(raw_arg: string, app_args: []Argument) -> Maybe(Argument) {
 }
 
 @(private)
-match_value :: proc(index: int, raw_args: []string) -> Maybe(string) {
+match_value :: proc(index: int, raw_args: []string) -> (value: string, ok: bool) {
 	if len(raw_args) > index + 1 {
-		return raw_args[index + 1]
+		value = raw_args[index + 1]
+		ok = true
+		return
 	}
 
-	return nil
+	return
 }
 
-parse :: proc(app: App) -> ParsedArgs {
-	app := app
-	parse_command(&app)
-	parse_flags(&app)
-	parse_args(&app)
-	return app.parsed_args
+parse :: proc(app: ^App, input: []string) -> (parsed: ParsedArgs) {
+	input := input[1:]
+	parsed.command, _ = parse_command(app.commands, input)
+	parsed.flags = parse_flags(app.flags, input)
+	parsed.args = parse_args(app.args, input)
+	return
 }
 
-print_help :: proc(app: App) {
+print_help :: proc(app: ^App) {
 	fmt.printf("%s (%s) - %s\n", app.name, app.version, app.description)
 	fmt.printf("Author: %s\n", app.author)
 	fmt.printf("Usage: %s OPTION\n\n", app.name)
@@ -183,5 +234,12 @@ calc_col_width :: proc(items: []string) -> int {
 	}
 
 	return max
+}
+
+main :: proc() {
+	context.logger = log.create_console_logger()
+	defer log.destroy_console_logger(context.logger)
+
+	fmt.println(parse_command([]Command{{name = "foo"}}, os.args[1:]))
 }
 
