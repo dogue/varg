@@ -66,8 +66,6 @@ add_command :: proc(
 	app: ^App,
 	name: string,
 	help_text := "",
-	takes_value := false,
-	value := ""
 ) -> (err: mem.Allocator_Error) {
 	cmd := Command {
 		name = name,
