@@ -1,3 +1,6 @@
+> [!WARNING]
+> This turned into a real project and is actively being developed. The example here is out of date. I will rectify this soon.
+
 # Varg
 
 A simple (perhaps too much so) Odin library for CLI argument parsing.
