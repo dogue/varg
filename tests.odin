@@ -39,7 +39,7 @@ t_parse_command_with_value :: proc(t: ^testing.T) {
 		{"git push", "push", .None},
 		{"123 git paid", "paid", .None},
 		{"git rekt nerd", "rekt", .None},
-		{"git", "", .RequiredValueNotProvided}
+		{"git", "", .UnexpectedEOF},
 	}
 
 	commands := []Command {{name = "git", takes_value = true}}

@@ -10,11 +10,11 @@ App :: struct {
 	description: string,
 	version:     string,
 	author:      string,
+	// Display help text on empty input
 	auto_help:   bool,
 	commands:    []Command,
 	flags:       []Flag,
 	args:        []Argument,
-	parsed_args: ParsedArgs,
 }
 
 Command :: struct {
@@ -47,7 +47,8 @@ ParsedArgs :: struct {
 
 ParseError :: enum {
 	None,
-	RequiredValueNotProvided,
+	UnexpectedEOF,
+	NoValidArgs,
 }
 
 @(private)
@@ -64,12 +65,8 @@ parse_command :: proc(
 		if !ok do continue
 
 		if command.takes_value {
-			value, valid := match_value(i, input)
-			if valid {
-				command.value = value
-			} else {
-				err = .RequiredValueNotProvided
-			}
+			value := match_value(i, input) or_return
+			command.value = value
 		}
 
 		return
@@ -109,36 +106,21 @@ prefix_args :: proc(s, l: string) -> (short, long: string) {
 @(private)
 parse_flags :: proc(user_flags: []Flag, input: []string) -> (parsed_flags: map[string]bool) {
 	for arg in input {
-		matched := match_flag(arg, user_flags)
-		if matched != nil {
-			parsed_flags[matched.?.name] = true
-		}
+		matched, ok := match_flag(arg, user_flags)
+		if !ok do continue
+
+		parsed_flags[matched.name] = true
 	}
 
 	return
 }
 
 @(private)
-match_flag :: proc(raw_arg: string, app_flags: []Flag) -> Maybe(Flag) {
+match_flag :: proc(raw_arg: string, app_flags: []Flag) -> (matched: Flag, ok: bool) {
 	for flag in app_flags {
 		short, long := prefix_args(flag.short, flag.long)
 		if raw_arg == short || raw_arg == long {
-			return flag
-		}
-	}
-
-	return nil
-}
-
-@(private)
-parse_args :: proc(user_args: []Argument, input: []string) -> (args: map[string]string) {
-	for arg, i in input {
-		matched := match_arg(arg, user_args)
-		if matched != nil {
-			value, ok := match_value(i, input)
-			if ok {
-				args[matched.?.name] = value
-			}
+			return flag, true
 		}
 	}
 
@@ -146,40 +128,80 @@ parse_args :: proc(user_args: []Argument, input: []string) -> (args: map[string]
 }
 
 @(private)
-match_arg :: proc(raw_arg: string, app_args: []Argument) -> Maybe(Argument) {
+parse_args :: proc(
+	user_args: []Argument,
+	input: []string,
+) -> (
+	args: map[string]string,
+	err: ParseError,
+) {
+	for arg, i in input {
+		matched, ok := match_arg(arg, user_args)
+		if !ok do continue
+
+		value := match_value(i, input) or_return
+		args[matched.name] = value
+	}
+
+	return
+}
+
+@(private)
+match_arg :: proc(raw_arg: string, app_args: []Argument) -> (matched: Argument, ok: bool) {
 	for arg in app_args {
 		short, long := prefix_args(arg.short, arg.long)
 		if raw_arg == short || raw_arg == long {
-			return arg
+			return arg, true
 		}
 	}
 
-	return nil
+	return
 }
 
 @(private)
-match_value :: proc(index: int, raw_args: []string) -> (value: string, ok: bool) {
+match_value :: proc(index: int, raw_args: []string) -> (value: string, err: ParseError) {
 	if len(raw_args) > index + 1 {
 		value = raw_args[index + 1]
-		ok = true
 		return
+	}
+
+	err = .UnexpectedEOF
+	return
+}
+
+parse :: proc(app: ^App, input: []string) -> (parsed: ParsedArgs, err: ParseError) {
+	input := input[1:]
+
+	parsed.command = parse_command(app.commands, input) or_return
+	parsed.flags = parse_flags(app.flags, input)
+	parsed.args = parse_args(app.args, input) or_return
+
+	if parsed.command.name == "" && len(parsed.flags) < 1 && len(parsed.args) < 1 {
+		if app.auto_help do print_help(app)
+		err = .NoValidArgs
 	}
 
 	return
 }
 
-parse :: proc(app: ^App, input: []string) -> (parsed: ParsedArgs) {
-	input := input[1:]
-	parsed.command, _ = parse_command(app.commands, input)
-	parsed.flags = parse_flags(app.flags, input)
-	parsed.args = parse_args(app.args, input)
-	return
+@(private)
+print_header :: proc(app: ^App) {
+	fmt.printf("%s ", app.name)
+	if app.version != "" do fmt.printf("(%s) ", app.version)
+	if app.description != "" do fmt.printf("- %s", app.description)
+	fmt.println()
+
+	if app.author != "" do fmt.printf("Author: %s\n", app.author)
+
+	if len(app.commands) > 0 || len(app.flags) > 0 || len(app.args) > 0 {
+		fmt.printf("Usage: %s OPTION\n\n", app.name)
+	} else {
+		fmt.printf("Usage: %s\n\n", app.name)
+	}
 }
 
 print_help :: proc(app: ^App) {
-	fmt.printf("%s (%s) - %s\n", app.name, app.version, app.description)
-	fmt.printf("Author: %s\n", app.author)
-	fmt.printf("Usage: %s OPTION\n\n", app.name)
+	print_header(app)
 
 	cmd_opts := make([]string, len(app.commands))
 	cmd_help := make([]string, len(app.commands))
@@ -236,10 +258,20 @@ calc_col_width :: proc(items: []string) -> int {
 	return max
 }
 
+// !! IGNORE THIS !!
+//
+// It's here for playgrounding purposes.
 main :: proc() {
-	context.logger = log.create_console_logger()
-	defer log.destroy_console_logger(context.logger)
-
-	fmt.println(parse_command([]Command{{name = "foo"}}, os.args[1:]))
+	app := App {
+		name        = "test_app",
+		version     = "1.0",
+		description = "a test app for testing",
+		auto_help   = true,
+		flags = []Flag {
+			{name = "foo", short = "f", long = "foo", help_text = "foo me daddy"}
+		}
+	}
+	_, err := parse(&app, os.args)
+	fmt.println(err)
 }
 
