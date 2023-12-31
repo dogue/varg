@@ -1,29 +1,129 @@
+/*
+Package varg provides a basic framework for parsing command line arguments passed to an application.
+It provides utilities for defining subcommands, flags, and valued arguments (flags with values) and
+dynamically formatted help text display.
+*/
+
 package varg
 
 import "core:fmt"
 import "core:os"
 import "core:strings"
-import "core:log"
+import "core:mem"
 
+/*
+App represents a command-line application. It includes metadata and collections for commands, flags,
+and arguments defined by the package consumer.
+*/ 
 App :: struct {
 	name:        string,
 	description: string,
 	version:     string,
 	author:      string,
-	// Display help text on empty input
+	// sets whether varg's parser should automatically display help when no valid args are parsed
 	auto_help:   bool,
-	commands:    []Command,
-	flags:       []Flag,
-	args:        []Argument,
+	commands:    [dynamic]Command,
+	flags:       [dynamic]Flag,
+	args:        [dynamic]Argument,
 }
 
+// Allocates for and initializes a new App instance
+app_create :: proc(
+	name: string,
+	version := "1.0.0",
+	description := "",
+	author := "",
+	auto_help := false
+) -> (
+	app: ^App,
+	err: mem.Allocator_Error
+) {
+	app = new(App) or_return
+
+	app.commands = make([dynamic]Command) or_return
+	app.flags = make([dynamic]Flag) or_return
+	app.args = make([dynamic]Argument) or_return
+
+	app.name = name
+	app.version = version
+	app.description = description
+	app.author = author
+	app.auto_help = auto_help
+
+	return
+}
+
+app_destroy :: proc(app: ^App) -> mem.Allocator_Error {
+	delete(app.commands) or_return
+	delete(app.flags) or_return
+	delete(app.args) or_return
+	free(app) or_return
+	return .None
+}
+
+// Creates and appends a new subcommand to the App
+add_command :: proc(
+	app: ^App,
+	name: string,
+	help_text := "",
+	takes_value := false,
+	value := ""
+) -> (err: mem.Allocator_Error) {
+	cmd := Command {
+		name = name,
+		help_text = help_text,
+	}
+
+	append(&app.commands, cmd) or_return
+	return
+}
+
+// Creates and appends a new flag to the App
+add_flag :: proc(
+	app: ^App,
+	name: string,
+	short := "",
+	long := "",
+	help_text := "",
+) -> (err: mem.Allocator_Error) {
+	flag := Flag {
+		name = name,
+		short = short,
+		long = long,
+		help_text = help_text,
+	}
+
+	append(&app.flags, flag) or_return
+	
+	return
+}
+
+// Creates and appends a new argument to the App
+add_argument :: proc(
+	app: ^App,
+	name: string,
+	short := "",
+	long := "",
+	help_text := "",
+) -> (err: mem.Allocator_Error) {
+	arg := Argument {
+		name = name,
+		short = short,
+		long = long,
+		help_text = help_text
+	}
+
+	append(&app.args, arg) or_return
+	return
+}
+
+// Defines a subcommand
 Command :: struct {
 	name:        string,
-	takes_value: bool,
-	value:       string,
 	help_text:   string,
 }
 
+// Defines a boolean switch
 Flag :: struct {
 	name:      string,
 	help_text: string,
@@ -31,20 +131,23 @@ Flag :: struct {
 	short:     string,
 }
 
+// Like a flag, but requires a value to be passed
 Argument :: struct {
 	name:      string,
 	help_text: string,
 	long:      string,
 	short:     string,
-	multiple:  bool,
 }
 
+// Contains the parsed data returned from parse()
 ParsedArgs :: struct {
-	command: Command,
+	command: string,
 	flags:   map[string]bool,
 	args:    map[string]string,
 }
 
+// UnexpectedEOF: an argument is matched, but no value follows
+// NoValidArgs: none of the defined options were matched during parsing
 ParseError :: enum {
 	None,
 	UnexpectedEOF,
@@ -56,30 +159,23 @@ parse_command :: proc(
 	user_cmds: []Command,
 	input: []string,
 ) -> (
-	command: Command,
+	command: string,
 	err: ParseError,
 ) {
 	for arg, i in input {
 		ok: bool
 		command, ok = match_command(arg, user_cmds)
-		if !ok do continue
-
-		if command.takes_value {
-			value := match_value(i, input) or_return
-			command.value = value
-		}
-
-		return
+		if ok do return
 	}
 
 	return
 }
 
 @(private)
-match_command :: proc(raw_arg: string, app_cmds: []Command) -> (parsed: Command, ok: bool) {
+match_command :: proc(raw_arg: string, app_cmds: []Command) -> (parsed: string, ok: bool) {
 	for cmd in app_cmds {
 		if cmd.name == raw_arg {
-			return cmd, true
+			return cmd.name, true
 		}
 	}
 
@@ -92,16 +188,6 @@ prefix_args :: proc(s, l: string) -> (short, long: string) {
 	long = strings.concatenate([]string{"--", l})
 	return
 }
-
-// @(private)
-// parse_flags :: proc(app: ^App, args: []string) {
-// 	for arg in args {
-// 		matched := match_flag(arg, app.flags)
-// 		if matched != nil {
-// 			app.parsed_args.flags[matched.?.name] = true
-// 		}
-// 	}
-// }
 
 @(private)
 parse_flags :: proc(user_flags: []Flag, input: []string) -> (parsed_flags: map[string]bool) {
@@ -169,14 +255,16 @@ match_value :: proc(index: int, raw_args: []string) -> (value: string, err: Pars
 	return
 }
 
+// Unless you have a good reason to do otherwise, you should always pass `os.args` in as `input`
+// without tampering. The first element is ignored inside the parser.
 parse :: proc(app: ^App, input: []string) -> (parsed: ParsedArgs, err: ParseError) {
 	input := input[1:]
 
-	parsed.command = parse_command(app.commands, input) or_return
-	parsed.flags = parse_flags(app.flags, input)
-	parsed.args = parse_args(app.args, input) or_return
+	parsed.command = parse_command(app.commands[:], input) or_return
+	parsed.flags = parse_flags(app.flags[:], input)
+	parsed.args = parse_args(app.args[:], input) or_return
 
-	if parsed.command.name == "" && len(parsed.flags) < 1 && len(parsed.args) < 1 {
+	if parsed.command == "" && len(parsed.flags) < 1 && len(parsed.args) < 1 {
 		if app.auto_help do print_help(app)
 		err = .NoValidArgs
 	}
@@ -200,6 +288,8 @@ print_header :: proc(app: ^App) {
 	}
 }
 
+// Displays dynamically formatted help text for the app
+// Metadata fields that are empty are not displayed
 print_help :: proc(app: ^App) {
 	print_header(app)
 
@@ -257,21 +347,3 @@ calc_col_width :: proc(items: []string) -> int {
 
 	return max
 }
-
-// !! IGNORE THIS !!
-//
-// It's here for playgrounding purposes.
-main :: proc() {
-	app := App {
-		name        = "test_app",
-		version     = "1.0",
-		description = "a test app for testing",
-		auto_help   = true,
-		flags = []Flag {
-			{name = "foo", short = "f", long = "foo", help_text = "foo me daddy"}
-		}
-	}
-	_, err := parse(&app, os.args)
-	fmt.println(err)
-}
-

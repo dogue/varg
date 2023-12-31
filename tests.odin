@@ -25,31 +25,7 @@ t_parse_command :: proc(t: ^testing.T) {
 		cmd, err := parse_command(commands, args)
 
 		testing.expect_value(t, err, ParseError.None)
-		testing.expect_value(t, cmd.name, test.expected)
-	}
-}
-
-@(test)
-t_parse_command_with_value :: proc(t: ^testing.T) {
-	tests := []struct {
-		input: string, 
-		expected_name: string,
-		expected_err: ParseError,
-	}{
-		{"git push", "push", .None},
-		{"123 git paid", "paid", .None},
-		{"git rekt nerd", "rekt", .None},
-		{"git", "", .UnexpectedEOF},
-	}
-
-	commands := []Command {{name = "git", takes_value = true}}
-
-	for test in tests {
-		args := strings.split(test.input, " ")
-		cmd, err := parse_command(commands, args)
-
-		testing.expect_value(t, err, test.expected_err)
-		testing.expect_value(t, cmd.value, test.expected_name)
+		testing.expect_value(t, cmd, test.expected)
 	}
 }
 
@@ -76,6 +52,31 @@ t_parse_flags :: proc(t: ^testing.T) {
 		flags := parse_flags(flags, args)
 
 		for k, v in flags {
+			testing.expect_value(t, v, test.expected[k])
+		}
+	}
+}
+
+@(test)
+t_parse_args :: proc(t: ^testing.T) {
+	tests := []struct {
+		input: string,
+		expected: map[string]string,
+		err: ParseError,
+	}{
+		{"foo --big chungus", {"big" = "chungus"}, .None},
+		{"foo -b man", {"big" = "man"}, .None},
+		{"foo -b", {"big" = ""}, .UnexpectedEOF},
+	}
+
+	arguments := []Argument {{name = "big", short = "b", long = "big"}}
+
+	for test in tests {
+		args := strings.split(test.input, " ")
+		parsed, err := parse_args(arguments, args)
+
+		testing.expect_value(t, err, test.err)
+		for k, v in parsed {
 			testing.expect_value(t, v, test.expected[k])
 		}
 	}
