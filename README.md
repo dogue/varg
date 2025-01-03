@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> This repo is no longer being maintained. I recommend using `core:flags` or the `cli` package I have [here](https://github.com/dogue/dogma).
+
 # Varg
 
 A simple (perhaps too much so) Odin library for CLI argument parsing.
